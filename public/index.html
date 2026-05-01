@@ -63,6 +63,22 @@
           </div>
         </div>
 
+        <div class="columns">
+          <div class="puzzle-box">
+            <h3>Office Map</h3>
+            <div id="mapGrid" class="map-grid"></div>
+          </div>
+          <div class="puzzle-box">
+            <h3>Evidence Board</h3>
+            <ul id="clueList" class="clue-list"></ul>
+          </div>
+        </div>
+
+        <div class="puzzle-box">
+          <h3>PA System</h3>
+          <p id="announcementText"></p>
+        </div>
+
         <div id="puzzleArea"></div>
         <p id="answerError" class="error"></p>
         <div id="hostControls" class="hidden"></div>
@@ -71,6 +87,7 @@
         <ul id="logList" class="log"></ul>
       </section>
     </main>
+    <div id="toast" class="toast hidden"></div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>

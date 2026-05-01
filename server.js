@@ -61,6 +61,25 @@ const PUZZLES = [
   }
 ];
 
+const EXPLORATION_SPOTS = {
+  badge: [
+    { id: "badge-desk", label: "Search Reception Desk", clue: "A sticky note reads: MDR = Macrodata Refinement." },
+    { id: "badge-monitor", label: "Inspect Security Monitor", clue: "Login prompt highlights: 'Use department codename only.'" }
+  ],
+  wellness: [
+    { id: "wellness-frame", label: "Inspect Wellness Frame", clue: "A faded quote ends with: 'You are ___ in this place.'" },
+    { id: "wellness-tape", label: "Play Cassette Recording", clue: "Voice repeats: 'You are safe in this place.'" }
+  ],
+  breakroom: [
+    { id: "breakroom-calendar", label: "Check Wall Calendar", clue: "Numbers are circled in this order: 2, 3, 1, 4." },
+    { id: "breakroom-speaker", label: "Listen to Break Room Speaker", clue: "A mechanical voice whispers: 'Keep the sequence, do not sum.'" }
+  ],
+  elevator: [
+    { id: "elevator-plaque", label: "Read Elevator Plaque", clue: "Inscription: 'Defiance is rhythm. Rhythm is jazz.'" },
+    { id: "elevator-panel", label: "Open Override Panel", clue: "Typed in chalk: 'Defiant Jazz'." }
+  ]
+};
+
 function normalize(value) {
   return String(value || "")
     .trim()
@@ -94,6 +113,9 @@ function getPublicState(session) {
     }
   }
   const timeRemainingMs = Math.max(session.endsAt - Date.now(), 0);
+  const activeSpots = activePuzzle ? EXPLORATION_SPOTS[activePuzzle.id] || [] : [];
+  const discoveredSpots = activePuzzle ? session.discoveredSpots.get(activePuzzle.id) || new Set() : new Set();
+  const clueProgress = activeSpots.length ? `${discoveredSpots.size}/${activeSpots.length}` : "0/0";
 
   return {
     id: session.id,
@@ -110,6 +132,21 @@ function getPublicState(session) {
     puzzleWarning,
     hintLevel,
     hintText,
+    activeExploration: activePuzzle
+      ? {
+          required: activeSpots.length,
+          discovered: discoveredSpots.size,
+          clueProgress,
+          canAnswer: activeSpots.length === 0 || discoveredSpots.size >= activeSpots.length,
+          spots: activeSpots.map((spot) => ({
+            id: spot.id,
+            label: spot.label,
+            discovered: discoveredSpots.has(spot.id),
+            clue: discoveredSpots.has(spot.id) ? spot.clue : ""
+          }))
+        }
+      : null,
+    discoveredClues: session.discoveredClues.slice(-8),
     puzzles: PUZZLES.map((puzzle, index) => ({
       id: puzzle.id,
       title: puzzle.title,
@@ -137,6 +174,8 @@ function createSession(hostName) {
     players: new Map(),
     solved: new Set(),
     hintLevels: new Map(),
+    discoveredSpots: new Map(),
+    discoveredClues: [],
     startedAt: null,
     autoStartAt: null,
     puzzleStartedAt: null,
@@ -205,6 +244,12 @@ io.on("connection", (socket) => {
       callback({ ok: false, error: "That station is still locked." });
       return;
     }
+    const requiredSpots = EXPLORATION_SPOTS[currentPuzzle.id] || [];
+    const discovered = session.discoveredSpots.get(currentPuzzle.id) || new Set();
+    if (requiredSpots.length > 0 && discovered.size < requiredSpots.length) {
+      callback({ ok: false, error: "Search the room first. You are missing clue fragments." });
+      return;
+    }
 
     if (normalize(answer) !== normalize(currentPuzzle.answer)) {
       callback({ ok: false, error: "Access denied. Try another phrase." });
@@ -241,6 +286,48 @@ io.on("connection", (socket) => {
     session.hintLevels.set(currentPuzzle.id, nextLevel);
     const playerName = session.players.get(socket.id) || "A player";
     addLog(session, `${playerName} requested hint ${nextLevel} for ${currentPuzzle.title}.`);
+    callback({ ok: true });
+    emitState(sessionId);
+  });
+
+  socket.on("explore:search", ({ sessionId, spotId }, callback) => {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      callback({ ok: false, error: "Session expired." });
+      return;
+    }
+    if (!session.startedAt) {
+      callback({ ok: false, error: "Game has not started yet." });
+      return;
+    }
+    const solvedCount = session.solved.size;
+    const currentPuzzle = PUZZLES[solvedCount];
+    if (!currentPuzzle) {
+      callback({ ok: false, error: "No active puzzle." });
+      return;
+    }
+    const spots = EXPLORATION_SPOTS[currentPuzzle.id] || [];
+    const spot = spots.find((item) => item.id === spotId);
+    if (!spot) {
+      callback({ ok: false, error: "Nothing useful found there." });
+      return;
+    }
+
+    const found = session.discoveredSpots.get(currentPuzzle.id) || new Set();
+    if (found.has(spotId)) {
+      callback({ ok: false, error: "That clue was already discovered." });
+      return;
+    }
+    found.add(spotId);
+    session.discoveredSpots.set(currentPuzzle.id, found);
+    session.discoveredClues.push({
+      puzzleId: currentPuzzle.id,
+      spotId: spot.id,
+      label: spot.label,
+      clue: spot.clue
+    });
+    const playerName = session.players.get(socket.id) || "A player";
+    addLog(session, `${playerName} found a clue at ${spot.label}.`);
     callback({ ok: true });
     emitState(sessionId);
   });
@@ -329,6 +416,7 @@ io.on("connection", (socket) => {
     }
     session.solved.clear();
     session.hintLevels.clear();
+    session.discoveredSpots.clear();
     session.startedAt = null;
     session.autoStartAt = null;
     session.puzzleStartedAt = null;

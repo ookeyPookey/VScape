@@ -58,6 +58,11 @@ button:hover {
   background: #3d66cc;
 }
 
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 h1 {
   letter-spacing: 0.8px;
 }
@@ -110,6 +115,62 @@ ul {
 
 .warning {
   color: #ffcf70;
+}
+
+.explore-box {
+  border-color: #7f5aff;
+}
+
+.clue-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.clue-list li {
+  margin-bottom: 8px;
+}
+
+.clue-list span {
+  color: #c9d8ef;
+  font-size: 13px;
+}
+
+.map-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.map-room {
+  border: 1px solid #2f4463;
+  border-radius: 8px;
+  background: #0f1725;
+  padding: 8px;
+  font-size: 12px;
+}
+
+.map-room.active {
+  border-color: #7cb4ff;
+  box-shadow: 0 0 0 1px #7cb4ff inset;
+}
+
+.map-room.done {
+  border-color: #67d38b;
+  box-shadow: 0 0 0 1px #67d38b inset;
+}
+
+.toast {
+  position: fixed;
+  right: 18px;
+  bottom: 16px;
+  max-width: 320px;
+  border: 1px solid #5379a9;
+  background: #112034;
+  color: #e9f0fb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.4);
+  z-index: 20;
 }
 
 .scene {

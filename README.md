@@ -24,6 +24,7 @@ Quick multiplayer browser escape room inspired by office-thriller vibes.
 - Host controls to skip a stuck puzzle if needed.
 - Host start controls: Start Now, Auto-Start (15s), and full Reset Session.
 - Per-puzzle timer warnings to keep teams on pace.
+- Exploration gameplay: search station hotspots to reveal clue fragments before answers unlock.
 
 ## Deploy (Render, fastest)
 

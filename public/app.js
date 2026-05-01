@@ -4,6 +4,8 @@ let currentSessionId = null;
 let currentState = null;
 let lastPuzzleRenderKey = "";
 let lastHostControlsRenderKey = "";
+let lastSolvedCount = 0;
+let toastTimeout = null;
 
 const lobbyEl = document.getElementById("lobby");
 const gameEl = document.getElementById("game");
@@ -24,6 +26,17 @@ const timerTextEl = document.getElementById("timerText");
 const hostControlsEl = document.getElementById("hostControls");
 const sceneEl = document.getElementById("scene");
 const elevatorVisualEl = document.getElementById("elevatorVisual");
+const mapGridEl = document.getElementById("mapGrid");
+const clueListEl = document.getElementById("clueList");
+const announcementTextEl = document.getElementById("announcementText");
+const toastEl = document.getElementById("toast");
+
+const ROOM_LABELS = {
+  badge: "Security Desk",
+  wellness: "Wellness Wing",
+  breakroom: "Break Room",
+  elevator: "Elevator Bay"
+};
 
 function renderPuzzleTheme(puzzleId) {
   if (puzzleId === "badge") {
@@ -36,6 +49,82 @@ function renderPuzzleTheme(puzzleId) {
     return "<p><strong>Station Feed:</strong> The break room speaker loops the same chime.</p>";
   }
   return "<p><strong>Station Feed:</strong> Elevator lock relay is waiting for the final passphrase.</p>";
+}
+
+function renderExplorationPanel(exploration) {
+  if (!exploration) return "";
+  const spotsHtml = exploration.spots
+    .map((spot) => {
+      if (spot.discovered) {
+        return `<li>✅ ${spot.label}<br/><span>${spot.clue}</span></li>`;
+      }
+      return `<li><button class="search-spot-btn" data-spot-id="${spot.id}">🔎 ${spot.label}</button></li>`;
+    })
+    .join("");
+
+  return `
+    <div class="puzzle-box explore-box">
+      <h3>Explore the Station</h3>
+      <p>Clues found: <strong>${exploration.clueProgress}</strong></p>
+      <ul class="clue-list">${spotsHtml}</ul>
+    </div>
+  `;
+}
+
+function showToast(message) {
+  if (!message) return;
+  toastEl.textContent = message;
+  toastEl.classList.remove("hidden");
+  if (toastTimeout) {
+    clearTimeout(toastTimeout);
+  }
+  toastTimeout = setTimeout(() => {
+    toastEl.classList.add("hidden");
+  }, 2400);
+}
+
+function getAnnouncement(state) {
+  if (state.allSolved) return "PA: Outie transfer approved. Elevator route now open.";
+  if (!state.startedAt) return "PA: Team briefing in progress. Await host authorization.";
+  if (state.timeRemainingMs < 5 * 60 * 1000) return "PA: Final call. Five minutes remain in this cycle.";
+  if (state.activeExploration && !state.activeExploration.canAnswer) {
+    return "PA: Please perform a complete station sweep before terminal input.";
+  }
+  if (state.puzzleWarning) return `PA: ${state.puzzleWarning}`;
+  const lines = [
+    "PA: Stay in formation and report unusual hallway activity.",
+    "PA: Record all findings. Compliance is appreciated.",
+    "PA: Unscheduled curiosity is still curiosity. Proceed carefully."
+  ];
+  return lines[state.solvedCount % lines.length];
+}
+
+function renderMapAndEvidence(state) {
+  const activePuzzle = state.puzzles.find((p) => p.unlocked && !p.solved);
+  mapGridEl.innerHTML = state.puzzles
+    .map((puzzle) => {
+      const classes = [
+        "map-room",
+        puzzle.solved ? "done" : "",
+        activePuzzle && activePuzzle.id === puzzle.id && state.startedAt ? "active" : ""
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `<div class="${classes}"><strong>${ROOM_LABELS[puzzle.id] || puzzle.title}</strong><br/>${
+        puzzle.solved ? "Cleared" : puzzle.unlocked ? "Accessible" : "Locked"
+      }</div>`;
+    })
+    .join("");
+
+  if (!state.discoveredClues || state.discoveredClues.length === 0) {
+    clueListEl.innerHTML = "<li>No clue fragments discovered yet.</li>";
+  } else {
+    clueListEl.innerHTML = state.discoveredClues
+      .map((entry) => `<li>📌 <strong>${entry.label}</strong><br/><span>${entry.clue}</span></li>`)
+      .join("");
+  }
+
+  announcementTextEl.textContent = getAnnouncement(state);
 }
 
 function syncSceneState(state) {
@@ -107,7 +196,12 @@ function showGame(state) {
     .join("");
 
   logListEl.innerHTML = state.log.map((item) => `<li>${item}</li>`).join("");
+  renderMapAndEvidence(state);
   syncSceneState(state);
+  if (state.solvedCount > lastSolvedCount) {
+    showToast("Station cleared. Corridor access updated.");
+  }
+  lastSolvedCount = state.solvedCount;
 
   const currentPuzzle = state.puzzles.find((p) => p.unlocked && !p.solved);
 
@@ -132,7 +226,8 @@ function showGame(state) {
       const puzzleRenderKey = JSON.stringify({
         id: currentPuzzle.id,
         hintText: state.hintText || "",
-        warning: state.puzzleWarning || ""
+        warning: state.puzzleWarning || "",
+        exploration: state.activeExploration
       });
 
       // Avoid replacing focused inputs every second from timer-only updates.
@@ -144,10 +239,14 @@ function showGame(state) {
             <p>${currentPuzzle.prompt}</p>
             ${state.hintText ? `<p><strong>Hint:</strong> ${state.hintText}</p>` : ""}
             ${state.puzzleWarning ? `<p class="warning"><strong>Timer Alert:</strong> ${state.puzzleWarning}</p>` : ""}
+            ${state.activeExploration && !state.activeExploration.canAnswer
+              ? `<p class="warning"><strong>Access Locked:</strong> Find all clue fragments before submitting.</p>`
+              : ""}
             <input id="answerInput" placeholder="Enter answer..." />
-            <button id="submitAnswerBtn">Submit</button>
+            <button id="submitAnswerBtn" ${state.activeExploration && !state.activeExploration.canAnswer ? "disabled" : ""}>Submit</button>
             <button id="hintBtn">Request Hint</button>
           </div>
+          ${renderExplorationPanel(state.activeExploration)}
         `;
         lastPuzzleRenderKey = puzzleRenderKey;
 
@@ -177,6 +276,19 @@ function showGame(state) {
             if (!res.ok) {
               answerErrorEl.textContent = res.error || "Hint unavailable.";
             }
+          });
+        });
+
+        const searchButtons = document.querySelectorAll(".search-spot-btn");
+        searchButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            const spotId = button.getAttribute("data-spot-id");
+            clearErrors();
+            socket.emit("explore:search", { sessionId: currentSessionId, spotId }, (res) => {
+              if (!res.ok) {
+                answerErrorEl.textContent = res.error || "Search failed.";
+              }
+            });
           });
         });
       }
