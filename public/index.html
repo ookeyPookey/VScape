@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VScape - Severed Floor Escape</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <section id="lobby" class="card">
+        <h1>VScape: Severed Floor</h1>
+        <p>Coordinate with your team and escape the office.</p>
+        <label>
+          Your Name
+          <input id="playerName" placeholder="Helly / Mark / Irving..." maxlength="24" />
+        </label>
+
+        <div class="actions">
+          <button id="createBtn">Create New Session</button>
+        </div>
+
+        <div class="join">
+          <label>
+            Join Existing Game ID
+            <input id="sessionIdInput" placeholder="ABC123" maxlength="6" />
+          </label>
+          <button id="joinBtn">Join Session</button>
+        </div>
+        <p id="lobbyError" class="error"></p>
+      </section>
+
+      <section id="game" class="card hidden">
+        <div class="topbar">
+          <h2>Game ID: <span id="sessionCode">------</span></h2>
+          <p id="statusText"></p>
+          <p id="timerText" class="timer"></p>
+        </div>
+
+        <div class="columns">
+          <div>
+            <h3>Players</h3>
+            <ul id="playersList"></ul>
+          </div>
+          <div>
+            <h3>Progress</h3>
+            <ul id="progressList"></ul>
+          </div>
+        </div>
+
+        <div id="puzzleArea"></div>
+        <p id="answerError" class="error"></p>
+        <div id="hostControls" class="hidden"></div>
+
+        <h3>Floor Activity</h3>
+        <ul id="logList" class="log"></ul>
+      </section>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
