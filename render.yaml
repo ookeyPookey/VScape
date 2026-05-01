@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: vscape
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: SESSION_MINUTES
+        value: "30"

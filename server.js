@@ -80,21 +80,34 @@ function generateSessionId() {
 function getPublicState(session) {
   const solvedCount = session.solved.size;
   const allSolved = solvedCount === PUZZLES.length;
-  const activePuzzle = PUZZLES[solvedCount];
+  const activePuzzle = session.startedAt ? PUZZLES[solvedCount] : null;
   const hintLevel = session.hintLevels.get(activePuzzle?.id) || 0;
   const hintText =
     activePuzzle && hintLevel > 0 ? activePuzzle.hints[Math.min(hintLevel - 1, activePuzzle.hints.length - 1)] : "";
+  const puzzleElapsedMs = session.puzzleStartedAt ? Date.now() - session.puzzleStartedAt : 0;
+  let puzzleWarning = "";
+  if (session.startedAt && !allSolved) {
+    if (puzzleElapsedMs >= 4 * 60 * 1000) {
+      puzzleWarning = "This puzzle has been open for 4+ minutes. Consider requesting another hint.";
+    } else if (puzzleElapsedMs >= 2 * 60 * 1000) {
+      puzzleWarning = "2-minute warning: if stuck, use hints early to keep pace.";
+    }
+  }
   const timeRemainingMs = Math.max(session.endsAt - Date.now(), 0);
 
   return {
     id: session.id,
     hostSocketId: session.hostSocketId,
+    startedAt: session.startedAt,
+    autoStartAt: session.autoStartAt,
     players: [...session.players.values()],
     solved: [...session.solved],
     solvedCount,
     allSolved,
     endsAt: session.endsAt,
     timeRemainingMs,
+    puzzleElapsedMs,
+    puzzleWarning,
     hintLevel,
     hintText,
     puzzles: PUZZLES.map((puzzle, index) => ({
@@ -124,6 +137,9 @@ function createSession(hostName) {
     players: new Map(),
     solved: new Set(),
     hintLevels: new Map(),
+    startedAt: null,
+    autoStartAt: null,
+    puzzleStartedAt: null,
     endsAt: Date.now() + Number(process.env.SESSION_MINUTES || 30) * 60 * 1000,
     log: []
   };
@@ -164,6 +180,10 @@ io.on("connection", (socket) => {
     session.players.set(socket.id, cleanName);
     socket.join(id);
     addLog(session, `${cleanName} entered the severed floor.`);
+    if (!session.startedAt && !session.autoStartAt && session.players.size >= 2) {
+      session.autoStartAt = Date.now() + 15000;
+      addLog(session, "Auto-start armed for 15 seconds.");
+    }
     callback({ ok: true, sessionId: id, state: getPublicState(session) });
     emitState(id);
   });
@@ -172,6 +192,10 @@ io.on("connection", (socket) => {
     const session = sessions.get(sessionId);
     if (!session) {
       callback({ ok: false, error: "Session expired." });
+      return;
+    }
+    if (!session.startedAt) {
+      callback({ ok: false, error: "Game has not started yet." });
       return;
     }
 
@@ -189,6 +213,7 @@ io.on("connection", (socket) => {
 
     session.solved.add(puzzleId);
     session.hintLevels.delete(puzzleId);
+    session.puzzleStartedAt = Date.now();
     const playerName = session.players.get(socket.id) || "A player";
     addLog(session, `${playerName} solved ${currentPuzzle.title}.`);
     callback({ ok: true });
@@ -199,6 +224,10 @@ io.on("connection", (socket) => {
     const session = sessions.get(sessionId);
     if (!session) {
       callback({ ok: false, error: "Session expired." });
+      return;
+    }
+    if (!session.startedAt) {
+      callback({ ok: false, error: "Game has not started yet." });
       return;
     }
     const solvedCount = session.solved.size;
@@ -226,6 +255,10 @@ io.on("connection", (socket) => {
       callback({ ok: false, error: "Only the host can use that control." });
       return;
     }
+    if (!session.startedAt) {
+      callback({ ok: false, error: "Game has not started yet." });
+      return;
+    }
 
     const solvedCount = session.solved.size;
     const currentPuzzle = PUZZLES[solvedCount];
@@ -236,7 +269,71 @@ io.on("connection", (socket) => {
 
     session.solved.add(currentPuzzle.id);
     session.hintLevels.delete(currentPuzzle.id);
+    session.puzzleStartedAt = Date.now();
     addLog(session, `Host skipped ${currentPuzzle.title}.`);
+    callback({ ok: true });
+    emitState(sessionId);
+  });
+
+  socket.on("host:start", ({ sessionId }, callback) => {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      callback({ ok: false, error: "Session expired." });
+      return;
+    }
+    if (socket.id !== session.hostSocketId) {
+      callback({ ok: false, error: "Only the host can use that control." });
+      return;
+    }
+    if (session.startedAt) {
+      callback({ ok: false, error: "Game already started." });
+      return;
+    }
+    session.startedAt = Date.now();
+    session.autoStartAt = null;
+    session.puzzleStartedAt = Date.now();
+    addLog(session, "Host started the game.");
+    callback({ ok: true });
+    emitState(sessionId);
+  });
+
+  socket.on("host:autostart", ({ sessionId }, callback) => {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      callback({ ok: false, error: "Session expired." });
+      return;
+    }
+    if (socket.id !== session.hostSocketId) {
+      callback({ ok: false, error: "Only the host can use that control." });
+      return;
+    }
+    if (session.startedAt) {
+      callback({ ok: false, error: "Game already started." });
+      return;
+    }
+    session.autoStartAt = Date.now() + 15000;
+    addLog(session, "Host armed auto-start (15 seconds).");
+    callback({ ok: true });
+    emitState(sessionId);
+  });
+
+  socket.on("host:reset", ({ sessionId }, callback) => {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      callback({ ok: false, error: "Session expired." });
+      return;
+    }
+    if (socket.id !== session.hostSocketId) {
+      callback({ ok: false, error: "Only the host can use that control." });
+      return;
+    }
+    session.solved.clear();
+    session.hintLevels.clear();
+    session.startedAt = null;
+    session.autoStartAt = null;
+    session.puzzleStartedAt = null;
+    session.endsAt = Date.now() + Number(process.env.SESSION_MINUTES || 30) * 60 * 1000;
+    addLog(session, "Host reset the session and timer.");
     callback({ ok: true });
     emitState(sessionId);
   });
@@ -263,6 +360,12 @@ io.on("connection", (socket) => {
 
 setInterval(() => {
   for (const session of sessions.values()) {
+    if (!session.startedAt && session.autoStartAt && Date.now() >= session.autoStartAt) {
+      session.startedAt = Date.now();
+      session.autoStartAt = null;
+      session.puzzleStartedAt = Date.now();
+      addLog(session, "Auto-start triggered. Game is live.");
+    }
     emitState(session.id);
   }
 }, 1000);
