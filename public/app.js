@@ -2,6 +2,8 @@ const socket = io();
 
 let currentSessionId = null;
 let currentState = null;
+let lastPuzzleRenderKey = "";
+let lastHostControlsRenderKey = "";
 
 const lobbyEl = document.getElementById("lobby");
 const gameEl = document.getElementById("game");
@@ -107,114 +109,135 @@ function showGame(state) {
   logListEl.innerHTML = state.log.map((item) => `<li>${item}</li>`).join("");
   syncSceneState(state);
 
-  if (state.allSolved) {
-    puzzleAreaEl.innerHTML =
-      '<div class="puzzle-box"><h3>Outie Status: Restored</h3><p>You have escaped the severed floor. Great work, team.</p></div>';
-    return;
-  }
-
-  if (!state.startedAt) {
-    puzzleAreaEl.innerHTML =
-      '<div class="puzzle-box"><h3>Pre-Game Briefing</h3><p>Host can start now or arm auto-start from Host Controls.</p></div>';
-    answerErrorEl.textContent = "";
-  } else {
   const currentPuzzle = state.puzzles.find((p) => p.unlocked && !p.solved);
-  if (!currentPuzzle) return;
 
-  puzzleAreaEl.innerHTML = `
-    <div class="puzzle-box">
-      <h3>${currentPuzzle.title}</h3>
-      ${renderPuzzleTheme(currentPuzzle.id)}
-      <p>${currentPuzzle.prompt}</p>
-      ${state.hintText ? `<p><strong>Hint:</strong> ${state.hintText}</p>` : ""}
-      ${state.puzzleWarning ? `<p class="warning"><strong>Timer Alert:</strong> ${state.puzzleWarning}</p>` : ""}
-      <input id="answerInput" placeholder="Enter answer..." />
-      <button id="submitAnswerBtn">Submit</button>
-      <button id="hintBtn">Request Hint</button>
-    </div>
-  `;
-
-  const submitBtn = document.getElementById("submitAnswerBtn");
-  const answerInput = document.getElementById("answerInput");
-  submitBtn.addEventListener("click", () => {
-    clearErrors();
-    socket.emit(
-      "puzzle:answer",
-      {
-        sessionId: currentSessionId,
-        puzzleId: currentPuzzle.id,
-        answer: answerInput.value
-      },
-      (res) => {
-        if (!res.ok) {
-          answerErrorEl.textContent = res.error || "Incorrect answer.";
-        }
+  if (state.allSolved) {
+    const solvedKey = "solved";
+    if (lastPuzzleRenderKey !== solvedKey) {
+      puzzleAreaEl.innerHTML =
+        '<div class="puzzle-box"><h3>Outie Status: Restored</h3><p>You have escaped the severed floor. Great work, team.</p></div>';
+      lastPuzzleRenderKey = solvedKey;
+    }
+  } else {
+    if (!state.startedAt) {
+      const briefingKey = "briefing";
+      if (lastPuzzleRenderKey !== briefingKey) {
+        puzzleAreaEl.innerHTML =
+          '<div class="puzzle-box"><h3>Pre-Game Briefing</h3><p>Host can start now or arm auto-start from Host Controls.</p></div>';
+        lastPuzzleRenderKey = briefingKey;
       }
-    );
-  });
+      answerErrorEl.textContent = "";
+    } else {
+      if (!currentPuzzle) return;
+      const puzzleRenderKey = JSON.stringify({
+        id: currentPuzzle.id,
+        hintText: state.hintText || "",
+        warning: state.puzzleWarning || ""
+      });
 
-  const hintBtn = document.getElementById("hintBtn");
-  hintBtn.addEventListener("click", () => {
-    clearErrors();
-    socket.emit("puzzle:hint", { sessionId: currentSessionId }, (res) => {
-      if (!res.ok) {
-        answerErrorEl.textContent = res.error || "Hint unavailable.";
+      // Avoid replacing focused inputs every second from timer-only updates.
+      if (lastPuzzleRenderKey !== puzzleRenderKey) {
+        puzzleAreaEl.innerHTML = `
+          <div class="puzzle-box">
+            <h3>${currentPuzzle.title}</h3>
+            ${renderPuzzleTheme(currentPuzzle.id)}
+            <p>${currentPuzzle.prompt}</p>
+            ${state.hintText ? `<p><strong>Hint:</strong> ${state.hintText}</p>` : ""}
+            ${state.puzzleWarning ? `<p class="warning"><strong>Timer Alert:</strong> ${state.puzzleWarning}</p>` : ""}
+            <input id="answerInput" placeholder="Enter answer..." />
+            <button id="submitAnswerBtn">Submit</button>
+            <button id="hintBtn">Request Hint</button>
+          </div>
+        `;
+        lastPuzzleRenderKey = puzzleRenderKey;
+
+        const submitBtn = document.getElementById("submitAnswerBtn");
+        const answerInput = document.getElementById("answerInput");
+        submitBtn.addEventListener("click", () => {
+          clearErrors();
+          socket.emit(
+            "puzzle:answer",
+            {
+              sessionId: currentSessionId,
+              puzzleId: currentPuzzle.id,
+              answer: answerInput.value
+            },
+            (res) => {
+              if (!res.ok) {
+                answerErrorEl.textContent = res.error || "Incorrect answer.";
+              }
+            }
+          );
+        });
+
+        const hintBtn = document.getElementById("hintBtn");
+        hintBtn.addEventListener("click", () => {
+          clearErrors();
+          socket.emit("puzzle:hint", { sessionId: currentSessionId }, (res) => {
+            if (!res.ok) {
+              answerErrorEl.textContent = res.error || "Hint unavailable.";
+            }
+          });
+        });
       }
-    });
-  });
+    }
   }
 
   const isHost = socket.id && socket.id === state.hostSocketId;
-  if (isHost) {
-    hostControlsEl.classList.remove("hidden");
-    hostControlsEl.innerHTML = `
-      <div class="puzzle-box">
-        <h3>Host Controls</h3>
-        <button id="startBtn">Start Now</button>
-        <button id="autostartBtn">Auto-Start (15s)</button>
-        <button id="skipBtn">Skip Current Puzzle</button>
-        <button id="resetBtn">Reset Session</button>
-      </div>
-    `;
-    const startBtn = document.getElementById("startBtn");
-    startBtn.addEventListener("click", () => {
-      clearErrors();
-      socket.emit("host:start", { sessionId: currentSessionId }, (res) => {
-        if (!res.ok) {
-          answerErrorEl.textContent = res.error || "Host control failed.";
-        }
+  const hostControlsKey = JSON.stringify({ isHost, startedAt: Boolean(state.startedAt) });
+  if (lastHostControlsRenderKey !== hostControlsKey) {
+    lastHostControlsRenderKey = hostControlsKey;
+    if (isHost) {
+      hostControlsEl.classList.remove("hidden");
+      hostControlsEl.innerHTML = `
+        <div class="puzzle-box">
+          <h3>Host Controls</h3>
+          <button id="startBtn">Start Now</button>
+          <button id="autostartBtn">Auto-Start (15s)</button>
+          <button id="skipBtn">Skip Current Puzzle</button>
+          <button id="resetBtn">Reset Session</button>
+        </div>
+      `;
+      const startBtn = document.getElementById("startBtn");
+      startBtn.addEventListener("click", () => {
+        clearErrors();
+        socket.emit("host:start", { sessionId: currentSessionId }, (res) => {
+          if (!res.ok) {
+            answerErrorEl.textContent = res.error || "Host control failed.";
+          }
+        });
       });
-    });
-    const autostartBtn = document.getElementById("autostartBtn");
-    autostartBtn.addEventListener("click", () => {
-      clearErrors();
-      socket.emit("host:autostart", { sessionId: currentSessionId }, (res) => {
-        if (!res.ok) {
-          answerErrorEl.textContent = res.error || "Host control failed.";
-        }
+      const autostartBtn = document.getElementById("autostartBtn");
+      autostartBtn.addEventListener("click", () => {
+        clearErrors();
+        socket.emit("host:autostart", { sessionId: currentSessionId }, (res) => {
+          if (!res.ok) {
+            answerErrorEl.textContent = res.error || "Host control failed.";
+          }
+        });
       });
-    });
-    const skipBtn = document.getElementById("skipBtn");
-    skipBtn.addEventListener("click", () => {
-      clearErrors();
-      socket.emit("host:skip", { sessionId: currentSessionId }, (res) => {
-        if (!res.ok) {
-          answerErrorEl.textContent = res.error || "Host control failed.";
-        }
+      const skipBtn = document.getElementById("skipBtn");
+      skipBtn.addEventListener("click", () => {
+        clearErrors();
+        socket.emit("host:skip", { sessionId: currentSessionId }, (res) => {
+          if (!res.ok) {
+            answerErrorEl.textContent = res.error || "Host control failed.";
+          }
+        });
       });
-    });
-    const resetBtn = document.getElementById("resetBtn");
-    resetBtn.addEventListener("click", () => {
-      clearErrors();
-      socket.emit("host:reset", { sessionId: currentSessionId }, (res) => {
-        if (!res.ok) {
-          answerErrorEl.textContent = res.error || "Host control failed.";
-        }
+      const resetBtn = document.getElementById("resetBtn");
+      resetBtn.addEventListener("click", () => {
+        clearErrors();
+        socket.emit("host:reset", { sessionId: currentSessionId }, (res) => {
+          if (!res.ok) {
+            answerErrorEl.textContent = res.error || "Host control failed.";
+          }
+        });
       });
-    });
-  } else {
-    hostControlsEl.classList.add("hidden");
-    hostControlsEl.innerHTML = "";
+    } else {
+      hostControlsEl.classList.add("hidden");
+      hostControlsEl.innerHTML = "";
+    }
   }
 }
 
